@@ -43,11 +43,10 @@ function uc_paypoint_perm() {
  */
 function uc_paypoint_payment_method() {
   $cards = theme('uc_paypoint_cards');
-
   $methods[] = array(
     'id' => 'paypoint',
     'name' => t('PayPoint'),
-    'title' => variable_get('uc_paypoint_title', t('PayPoint')) .': '. $cards,
+    'title' => $cards,
     'review' => t('PayPoint'),
     'desc' => t('Redirect users to submit payments through PayPoint.'),
     'callback' => 'uc_payment_method_paypoint',
@@ -417,6 +416,7 @@ function uc_paypoint_complete($cart_id = 0) {
       $comment = t('Order successfully processed by PayPoint for order #!order.', array('!order' => $order->order_id));
       uc_payment_enter($order->order_id, 'paypoint', $parameters['amount'], 0, NULL, $comment);
       uc_order_comment_save($order->order_id, 0, t('Order created through website.'), 'admin');
+      // TODO: uc_cart_complete_sale() doesn't seem to be able to detect whether the user is logged in from the callback page.
       $output .= uc_cart_complete_sale($order);
       uc_cart_empty($parameters['cart_id']);
       break;
@@ -439,14 +439,18 @@ function uc_paypoint_complete($cart_id = 0) {
       $output .= t('The details of the order are not sufficient to complete the transaction and we were unable to process your payment. Please verify your details and try again. If the problem persists, please contact us. Many thanks. <a href="mailto:!email">!email</a>', array('!email' => variable_get('uc_store_email', '')));
   }
 
-  $message .= _uc_paypoint_authorisation_code($parameters) .'<br/><br/>';
-  if (isset($parameters['cv2avs'])) {
-    $message .= t('CV2AVS Message: ') . _uc_paypoint_cv2avs_message($parameters['cv2avs']) .'<br/><br/>';
-  }
+  $message .= _uc_paypoint_authorisation_code($parameters);
   watchdog('PayPoint', $message, WATCHDOG_NOTICE);
+  
+  if (isset($parameters['cv2avs'])) {
+    $cv2avs_message = t('CV2AVS message: ') . _uc_paypoint_cv2avs_message($parameters['cv2avs']);
+    uc_order_comment_save($order->order_id, 0, $cv2avs_message, 'admin');
+  }
 
   print uc_paypoint_debug($parameters, $order);
   print $output;
+  //drupal_set_message($output);
+  //drupal_goto('<front>');
 
 }
 
@@ -485,6 +489,7 @@ function _uc_paypoint_authentication($parameters) {
  */
 function _uc_paypoint_create_digest_parameter($order) {
   $remote_password = variable_get('uc_paypoint_remote_password', '');
+  # handle case where order total doesn't have decimal value
   $order_total = (!strpos($order->order_total, '.')) ? $order->order_total .'.00' : $order->order_total;
   $unhashed = $order->order_id . $order_total . $remote_password;
   $hashed = md5($unhashed);
@@ -493,7 +498,7 @@ function _uc_paypoint_create_digest_parameter($order) {
 
 function uc_paypoint_cancel() {
   unset($_SESSION['cart_order']);
-  drupal_set_message(t('Your PayPoint payment was cancelled. Please feel free to continue shopping or contact us for assistance.'));
+  drupal_set_message(t('Your PayPoint payment was cancelled. Please feel free to continue shopping or contact us for assistance. Click here to !cart.', array('!cart' => l('view your cart', 'cart'))));
   drupal_goto('cart');
 }
 
@@ -626,7 +631,8 @@ function uc_paypoint_debug($parameters, $order) {
 
 function theme_uc_paypoint_cards() {
   $image_path = drupal_get_path('module', 'uc_paypoint') .'/images/';
-
+  $title = variable_get('uc_paypoint_title', t('PayPoint'));
+  $power_by_paypoint = theme('image', $image_path .'powered-by-paypoint.png', $title, $title);
   $card_types = array(
     'visa' => 'Visa',
     'delta' => 'Delta',
@@ -637,11 +643,11 @@ function theme_uc_paypoint_cards() {
     'amex' => 'AMEX',
     'jbc' => 'JBC',
     'laser' => 'Laser',
-    'paypoint' => 'Secure payment by PayPoint',
   );
   foreach ($card_types as $card => $title) {
     $cards .= theme('image', $image_path . $card .'.gif', '', '', array('style' => 'position:relative; top:5px; margin-right:4px;'));
   }
+  $output = $power_by_paypoint . $cards;
 
-  return $cards;
+  return $output;
 }
