@@ -1,0 +1,6 @@
+<?php
+// $Id$
+
+function uc_paypoint_uninstall() {
+  db_query("DELETE FROM {variable} WHERE name LIKE 'uc_paypoint%'");
+}

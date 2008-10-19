@@ -1,0 +1,647 @@
+<?php
+// $Id$
+
+/**
+ * @file
+ * Integrates the PayPoint payment processing service with Ubercart.
+ */
+
+/**
+ * Implementation of hook_menu().
+ */
+function uc_paypoint_menu($may_cache) {
+
+  if ($may_cache) {
+    $items[] = array(
+      'path' => 'uc_paypoint/complete',
+      'title' => t('PayPoint payment complete'),
+      'callback' => 'uc_paypoint_complete',
+      'access' => user_access('access content'),
+      'type' => MENU_CALLBACK,
+    );
+    $items[] = array(
+      'path' => 'uc_paypoint/cancel',
+      'title' => t('PayPoint payment cancelled'),
+      'callback' => 'uc_paypoint_cancel',
+      'access' => user_access('access content'),
+      'type' => MENU_CALLBACK,
+    );
+  }
+
+  return $items;
+}
+
+/**
+ * Implementation of hook_perm().
+ */
+function uc_paypoint_perm() {
+  return array('administer paypoint');
+}
+
+/**
+ * Implementation of hook_payment_method().
+ */
+function uc_paypoint_payment_method() {
+  $cards = theme('uc_paypoint_cards');
+
+  $methods[] = array(
+    'id' => 'paypoint',
+    'name' => t('PayPoint'),
+    'title' => variable_get('uc_paypoint_title', t('PayPoint')) .': '. $cards,
+    'review' => t('PayPoint'),
+    'desc' => t('Redirect users to submit payments through PayPoint.'),
+    'callback' => 'uc_payment_method_paypoint',
+    'weight' => 1,
+    'checkout' => FALSE,
+    'no_gateway' => TRUE,
+  );
+  return $methods;
+}
+
+/**
+ *
+ */
+function uc_payment_method_paypoint($op, &$arg1) {
+  switch ($op) {
+
+    case 'order-view':
+      $trans_id = $arg1->order_id;
+      if (empty($trans_id)) {
+        $trans_id = t('Unknown');
+      }
+      return t('Transaction ID:<br>!trans_id', array('!trans_id' => $trans_id));
+
+    case 'settings':
+      $form['uc_paypoint_merchant'] = array(
+        '#type' => 'textfield',
+        '#title' => t('PayPoint merchant ID'),
+        '#description' => t('Your unique PayPoint merchant account number given to you when you registered with PayPoint.'),
+        '#default_value' => variable_get('uc_paypoint_merchant', 'abcdef01'),
+      );
+      $form['uc_paypoint_remote_password'] = array(
+        '#type' => 'textfield',
+        '#title' => t('Remote password'),
+        '#description' => t('Enter the remote password that you entered into your account on the PayPoint site. This value should be between 8 and 30 characters long.'),
+        '#maxlength' => 30,
+        '#default_value' => variable_get('uc_paypoint_remote_password', ''),
+      );
+      $form['uc_paypoint_digest_key'] = array(
+        '#type' => 'textfield',
+        '#title' => t('Digest key'),
+        '#description' => t('Enter the digest key that you entered into your account on the PayPoint site. This value should be between 8 and 30 characters long.'),
+        '#maxlength' => 30,
+        '#default_value' => variable_get('uc_paypoint_digest_key', ''),
+      );
+      $form['uc_paypoint_title'] = array(
+        '#type' => 'textfield',
+        '#title' => t('Title of payment option'),
+        '#description' => t('The title you enter here appears on the checkout page under <strong>Payment method</strong>.'),
+        '#default_value' => variable_get('uc_paypoint_title', t('PayPoint')),
+      );
+      $form['uc_paypoint_currency'] = array(
+        '#type' => 'select',
+        '#title' => t('Currency code'),
+        '#description' => t('Transactions can only be processed in one of the listed currencies.'),
+        '#options' => _uc_paypoint_currency_codes(),
+        '#default_value' => variable_get('uc_paypoint_currency', 'GBP'),
+      );
+      $form['uc_paypoint_test_status'] = array(
+        '#type' => 'select',
+        '#title' => t('Test status'),
+        '#description' => t('"Test" mode will simulate an authorised callback without contacting the bank, "Auto-decline" will simulate a declined callback without contacting the bank, and "Live" will send the transaction to the bank for authorization.'),
+        '#options' => array(
+          'true' => t('Test'),
+          'false' => t('Auto-decline'),
+          'live' => t('Live')
+        ),
+        '#default_value' => variable_get('uc_paypoint_test_status', 'true'),
+      );
+      $form['uc_paypoint_deferred_transactions'] = array(
+        '#type' => 'select',
+        '#title' => t('Deferred payments'),
+        '#description' => t('Deferred transactions are useful if you want to take orders for items that you cannot always guarantee will be in stock. Using deferred transactions, you can take an initial authorisation (at which point no money has actually been taken) and then when your product arrives in stock you can release the funds for the deferred transaction and then ship the product out to your customer. <ul><li>"Defer" will authorise only one unit of currency. This is useful for avoiding tying up funds in your customer\'s account if all you want to do is "get their details into the system".</li><li>"Full" will authorise the full amount of the
+transaction and freeze the funds in the customer\'s account. A new authorisation takes place when funds are released so be careful not to ship goods before confirming release of funds.</li><li>"Reuse" will authorise the full amount of the initial transaction but on release will use the original authorisation code (which was obtained by the initial deferred transaction - if it is still valid.) If not still valid, releasing will cause a new authorisation to take place (as is the casewith "Defer" and "Full").</li></ul>'),
+        '#options' => array(
+          'false' => t('Disabled'),
+          'true' => t('Defer'),
+          'full' => t('Full'),
+          'reuse' => t('Reuse'),
+        ),
+        '#default_value' => variable_get('uc_paypoint_deferred_transactions', 0),
+      );
+      $form['uc_paypoint_reuse_credit_days'] = array(
+        '#type' => 'select',
+        '#title' => t('Credit card reuse days'),
+        '#multiple' => FALSE,
+        '#description' => t('The number of days within which a credit card transaction should reuse the same authorisation code.'),
+        '#options' => drupal_map_assoc(range(1, 14)),
+        '#default_value' => variable_get('uc_paypoint_reuse_credit_days', 7),
+      );
+      $form['uc_paypoint_reuse_debit_days'] = array(
+        '#type' => 'select',
+        '#title' => t('Debit card reuse days'),
+        '#multiple' => FALSE,
+        '#description' => t('The number of days within which a debit card transaction should reuse the same authorisation code.'),
+        '#options' => drupal_map_assoc(range(1, 14)),
+        '#default_value' => variable_get('uc_paypoint_reuse_debit_days', 1),
+      );
+      $form['uc_paypoint_template'] = array(
+        '#type' => 'textfield',
+        '#title' => t('Template'),
+        '#description' => t('Enter the name of the template file stored on the PayPoint server e.g. mytemplate.html'),
+        '#default_value' => variable_get('uc_paypoint_template', ''),
+      );
+      $form['uc_paypoint_allow_back'] = array(
+       '#type' => 'checkbox',
+       '#title' => t('Provide back button on the PayPoint payment page.'),
+       '#description' => t('Enabling this option will add a "back" button to the PayPoint payment page allowing users to cancel their order. When a user presses this button they are returned to their cart and a message is displayed informing them that their order has been cancelled.'),
+       '#default_value' => variable_get('uc_paypoint_allow_back', 1),
+      );
+      // $form['uc_paypoint_request_method'] = array(
+      //  '#type' => 'select',
+      //  '#title' => t('Callback request'),
+      //  '#multiple' => FALSE,
+      //  '#description' => t('The description appears usually below the item.'),
+      //  '#options' => array('true' => 'POST', 'false' => 'GET'),
+      //  '#default_value' => variable_get('uc_paypoint_request_method', 'true'),
+      // );
+      $form['uc_paypoint_callback_ssl'] = array(
+        '#type' => 'checkbox',
+        '#title' => t('Use SSL for callback page'),
+        '#default_value' => variable_get('uc_paypoint_callback_ssl', 0),
+      );
+      $form['uc_paypoint_require_cv2'] = array(
+        '#type' => 'checkbox',
+        '#title' => t('Require CV2'),
+        '#default_value' => variable_get('uc_paypoint_require_cv2', 1),
+      );
+      $form['uc_paypoint_default_cv2avs'] = array(
+        '#type' => 'select',
+        '#title' => t('Default cv2avs value'),
+        '#multiple' => FALSE,
+        '#description' => t('This is the value for the cv2avs callback parameter returned by PayPoint\'s sevrer when running in test mode.'),
+        '#options' => _uc_paypoint_get_cv2avs_options(),
+        '#default_value' => variable_get('uc_paypoint_default_cv2avs', 'ALL MATCH'),
+      );
+      $form['uc_paypoint_send_billing'] = array(
+        '#type' => 'checkbox',
+        '#title' => t('Send billing information to PayPoint'),
+        '#default_value' => variable_get('uc_paypoint_send_billing', 1),
+      );
+      $form['uc_paypoint_duplicate_billing'] = array(
+        '#type' => 'checkbox',
+        '#title' => t('Send billing information as shipping information to PayPoint'),
+        '#default_value' => variable_get('uc_paypoint_duplicate_billing', 0),
+        '#description' => t('Enable this to copy the billing details and send them to PayPoint as shipping details.'),
+      );
+      $form['uc_paypoint_send_shipping'] = array(
+        '#type' => 'checkbox',
+        '#title' => t('Send shipping information to PayPoint'),
+        '#default_value' => variable_get('uc_paypoint_send_shipping', 1),
+        '#description' => t('Enabling this will override \'Send billing information as shipping information to PayPoint\''),
+      );
+      $form['uc_paypoint_send_email'] = array(
+        '#type' => 'checkbox',
+        '#title' => t('Send email address to PayPoint'),
+        '#default_value' => variable_get('uc_paypoint_send_email', 1),
+        '#description' => t('When sending the email address to PayPoint, PayPoint will send a payment confirmation email to the customer.'),
+      );
+      $form['uc_paypoint_authentication_fields'] = array(
+        '#type' => 'textfield',
+        '#title' => t('Authentication fields'),
+        '#description' => t('A list of fields to use for the authentication hash (fields are separated by colons e.g. "trans_id:amount:callback"). Possible fields are trans_id, amount, callback...'),
+        '#default_value' => variable_get('uc_paypoint_authentication_fields', 'trans_id:amount:callback'),
+      );
+      $form['uc_paypoint_duplicate_checking'] = array(
+        '#type' => 'checkbox',
+        '#title' => t('Disable duplicate checking'),
+        '#description' => t('This will turn off duplicate checking on the PayPoint server. Only useful for testing.'),
+        '#default_value' => variable_get('uc_paypoint_duplicate_checking', 0),
+      );
+      $form['uc_paypoint_debug'] = array(
+        '#type' => 'select',
+        '#title' => t('Debug mode'),
+        '#description' => t('Select the debug mode. \'Log\' will log debug info to watchdog and \'Full\' will interupt the checkout process and print debug info to the screen.'),
+        '#multiple' => FALSE,
+        '#options' => array(
+          'off' => 'Off',
+          'log' => 'Log',
+          'full' => 'Full',
+          ),
+        '#default_value' => variable_get('uc_paypoint_debug', 'off'),
+      );
+      return $form;
+  }
+}
+
+/**
+ * Implementation of hook_form_alter().
+ */
+function uc_paypoint_form_alter($form_id, &$form) {
+  if ($form_id == 'uc_cart_checkout_review_form' && ($order_id = intval($_SESSION['cart_order'])) > 0) {
+    $order = uc_order_load($order_id);
+
+    if ($order->payment_method == 'paypoint') {
+      $data = array(
+        'merchant' => variable_get('uc_paypoint_merchant', 'abcdef01'),
+        'trans_id' => $order->order_id,
+        'amount' => (!strpos($order->order_total, '.')) ? $order->order_total .'.00' : $order->order_total,
+        'callback' => uc_paypoint_get_callback(),
+        'currency' => variable_get('uc_paypoint_currency', 'GBP'),
+        'dups' => (variable_get('uc_paypoint_duplicate_checking', 0) === 1) ? 'false' : 'true',
+        'ssl_cb' => (variable_get('uc_paypoint_callback_ssl', 0) === 1) ? 'true' : 'false',
+        'md_flds' => variable_get('uc_paypoint_authentication_fields', 'trans_id:amount:callback'),
+        'digest' => _uc_paypoint_create_digest_parameter($order),
+        'template' => variable_get('uc_paypoint_template', ''),
+        'cb_post' => variable_get('uc_paypoint_request_method', 'true'),
+        'test_status' => variable_get('uc_paypoint_test_status', 'true'),
+        // Custom fields sent to PayPoint for use in the callback and in the card
+        // payment template as e.g. ${uid}
+        'cb_flds' => 'uid:cart_id',
+        'uid' => $order->uid,
+        'cart_id' => uc_cart_get_id(),
+      );
+      // Merging these in to the array avoids adding the field when not needed
+      if (variable_get('uc_paypoint_test_status', 'true') == 'true') {
+        $data += array(
+          'default_cv2avs' => variable_get('uc_paypoint_default_cv2avs', 'ALL MATCH'),
+        );
+      }
+      if (variable_get('uc_paypoint_require_cv2', 1)) {
+        $data += array(
+          'req_cv2' => 'true',
+        );
+      }
+      if (variable_get('uc_paypoint_allow_back', 1)) {
+        $data += array(
+          'backcallback' => url('uc_paypoint/cancel', NULL, NULL, TRUE),
+          'show_back' => 'back',
+        );
+      }
+      // Address fields
+      if (variable_get('uc_paypoint_send_billing', 1)) {
+        $data += array(
+          'bill_name'      => $order->billing_first_name .' '. $order->billing_last_name,
+          'bill_company'   => $order->billing_company,
+          'bill_addr_1'    => $order->billing_street1,
+          'bill_addr_2'    => $order->billing_street2,
+          'bill_city'      => $order->billing_city,
+          'bill_post_code' => $order->billing_postal_code,
+          'bill_tel'       => $order->billing_phone,
+        );
+      }
+      if (variable_get('uc_paypoint_send_shipping', 1)) {
+        $data += array(
+          'ship_name'      => $order->shipping_first_name .' '. $order->shipping_last_name,
+          'ship_company'   => $order->shipping_company,
+          'ship_addr_1'    => $order->shipping_street1,
+          'ship_addr_2'    => $order->shipping_street2,
+          'ship_city'      => $order->shipping_city,
+          'ship_post_code' => $order->shipping_postal_code,
+          'ship_tel'       => $order->shipping_phone,
+        );
+      }
+      else {
+        if (variable_get('uc_paypoint_duplicate_billing', 0)) {
+          $data += array(
+            'ship_name'      => $order->billing_first_name .' '. $order->billing_last_name,
+            'ship_company'   => $order->billing_company,
+            'ship_addr_1'    => $order->billing_street1,
+            'ship_addr_2'    => $order->billing_street2,
+            'ship_city'      => $order->billing_city,
+            'ship_post_code' => $order->billing_postal_code,
+            'ship_tel'       => $order->billing_phone,
+          );
+        }
+      }
+      if (variable_get('uc_paypoint_send_email', 1)) {
+        $data += array(
+          'bill_email' => $order->primary_email,
+        );
+      }
+
+      $form['#action'] = 'https://www.secpay.com/java-bin/ValCard';
+
+      // Add the items in the array to the form as hidden input fields
+      foreach ($data as $name => $value) {
+        $form[$name] = array('#type' => 'hidden', '#value' => $value);
+      }
+
+      //
+      // // Specify whether order confirmation details sent to the cardholder
+      // // should be emailed inline or as an attachment.
+      //       // 'true' = send as attachment (default)
+      //       // 'false' = send inline
+      // $form['mail_attach_customer'] = array('#type' => 'hidden', '#value' => 'true');
+      // // Same as mail_attach_customer but relates to order confirmation emails sent to the Merchant.
+      // $form['mail_attach_merchant'] = array('#type' => 'hidden', '#value' => 'true');
+      //
+      // // Specify whether to send order confirmation to the customer.
+      // //   'true' = send to bill_email
+      // //   'false' = don't send
+      // //   'bill' = send to bill_email
+      // //   'ship' = send to ship_email
+      // $form['mail_customer'] = array('#type' => 'hidden', '#value' => 'true'); // default
+      //
+      // // A colon separated list of merchant email recipients to override
+      // // default setup in Custom Account at PayPoint. A single colon will stop
+      // // sending emails to merchants.
+      // $form['mail_merchants'] = array('#type' => 'hidden', '#value' => 'rich@freestylesystems.co.uk'); // or ":"
+      //
+      // // This will put up a message on the confirmation email sent to both the
+      // // customer and the merchant. This option is also available as a form
+      // // field by the same name. This message will be displayed in addition to
+      // // the information which already exists in the email by default.
+      // $form['mail_message'] = array('#type' => 'hidden', '#value' => 'Thanks for shopping with us!');
+      //
+      // // Sets the subject line on order confirmation emails.
+      // $form['mail_subject'] = array('#type' => 'hidden', '#value' => 'Subject line of email.');
+      //
+      // // Allows mapping of existing field names to their PayPoint equivalents.
+      // // Use cb_flds to make new fields appear in the callback and expose to
+      // // card payment template.
+      // $form['map_flds'] = array('#type' => 'hidden', '#value' => 'amount=order_total:auth_code=bank_auth_code');
+    }
+  }
+}
+
+function uc_paypoint_complete($cart_id = 0) {
+  // Construct a new array to hold all our cleaned data as the number of values in POST can vary
+  foreach ($_POST as $name => $value) {
+    $parameters[check_plain($name)] = check_plain($value);
+  }
+  // Add in some of our own parameters.
+  $parameters['referrer'] = request_uri();
+  $parameters['callback'] = uc_paypoint_get_callback();
+  $authentication = _uc_paypoint_authentication($parameters);
+  $parameters['authentication_match'] = ($authentication['match']) ? 'true' : 'false';
+  $parameters['hashed'] = $authentication['hash'];
+  $parameters['message'] = _uc_paypoint_authorisation_code($parameters);
+  // $cid = $parameters['cart_id'];
+  // $parameters['cart_contents'] = uc_cart_get_contents($cid);
+
+  // First we check if the trans_id is in $_POST and if so load the order object.
+  if (isset($parameters['trans_id'])) {
+    $order = uc_order_load($parameters['trans_id']);
+    if ($order->payment_method != 'paypoint' && uc_order_status_data($order->order_status, 'state') != 'in_checkout') {
+      $output .= t('We were unable to process your payment. Please verify your details and try again. If the problem persists, please contact us. Many thanks. <a href="mailto:!email">!email</a>', array('!email' => variable_get('uc_store_email', '')));
+      watchdog('PayPoint', t('PayPoint order attempted for !trans_id.', array('!trans_id' => $parameters['trans_id'])), WATCHDOG_WARNING);
+      exit;
+    }
+    else {
+      watchdog('PayPoint', t('Callback received for order !order_id.', array('!order_id' => $order->order_id)), WATCHDOG_NOTICE, l(t('order !order_id', array('!order_id' => $order->order_id)), 'admin/store/orders/'. $parameters['uid'] .'/'. $order->order_id));
+    }
+  }
+  // If the trans_id is not set we assume there was an error and abort processing.
+  else {
+    $output .= t('We were unable to process your payment. Please verify your details and try again. If the problem persists, please contact us. Many thanks. <a href="mailto:!email">!email</a>', array('!email' => variable_get('uc_store_email', '')));
+    print $output;
+    exit;
+  }
+
+  //$output .= '<pre>'. print_r($order, true) .'</pre>';
+  //$output .= '<pre>'. print_r($authentication, true) .'</pre>';
+  //$output .= '<pre>'. print_r($_SESSION, true) .'</pre>';
+
+  // Sometimes when the authentication doesn't match the payment is still taken
+  // so we just log an admin comment to the order when this occurs to avoid
+  // confusing users.
+  if ($parameters['authentication_match'] == 'false') {
+    $comment = t('Authentication of hash failed for this transaction.');
+    uc_order_comment_save($order->order_id, 0, $comment, 'admin');
+  }
+
+  switch ($parameters['code']) {
+
+    case 'A': // Transaction authorised.
+      $comment = t('Order successfully processed by PayPoint for order #!order.', array('!order' => $order->order_id));
+      uc_payment_enter($order->order_id, 'paypoint', $parameters['amount'], 0, NULL, $comment);
+      uc_order_comment_save($order->order_id, 0, t('Order created through website.'), 'admin');
+      $output .= uc_cart_complete_sale($order);
+      uc_cart_empty($parameters['cart_id']);
+      break;
+
+    case 'N': // Payment not authorised by the bank.
+      $output .= t('The transaction was not authorised by the bank. Please contact us to complete your order <a href="mailto:!email">!email</a>', array('!email' => variable_get('uc_store_email', '')));
+      $response_code = _uc_paypoint_response_code($parameters['resp_code']);
+      $message = $parameters['message'] . $response_code;
+      break;
+
+    case "C": // Communication error.
+    default:
+      $output .= t('A communication error occurred. Please try again later or contact us to complete your order <a href="mailto:!email">!email</a>', array('!email' => variable_get('uc_store_email', '')));
+      $message = t('Communication error');
+      break;
+
+    case "P:A": case "P:X": case "P:P": case "P:S": case "P:E": case "P:I":
+    case "P:C": case "P:T": case "P:N": case "P:M": case "P:B": case "P:D":
+    case "P:V": case "P:R": case "P:#": // Pre-bank checks failed.
+      $output .= t('The details of the order are not sufficient to complete the transaction and we were unable to process your payment. Please verify your details and try again. If the problem persists, please contact us. Many thanks. <a href="mailto:!email">!email</a>', array('!email' => variable_get('uc_store_email', '')));
+  }
+
+  $message .= _uc_paypoint_authorisation_code($parameters) .'<br/><br/>';
+  if (isset($parameters['cv2avs'])) {
+    $message .= t('CV2AVS Message: ') . _uc_paypoint_cv2avs_message($parameters['cv2avs']) .'<br/><br/>';
+  }
+  watchdog('PayPoint', $message, WATCHDOG_NOTICE);
+
+  print uc_paypoint_debug($parameters, $order);
+  print $output;
+
+}
+
+/**
+ * Ensures a properly formed callback URL for SSL and non-SSL paths.
+ */
+function uc_paypoint_get_callback() {
+  global $base_url;
+  $callback = $base_url . '/uc_paypoint/complete';
+  if (!variable_get('uc_paypoint_callback_ssl', 0)) {
+    $callback = str_replace('https://', 'http://', $callback);
+  }
+  return $callback;
+}
+
+/**
+ * Creates the digest parameter to send to PayPoint to authenticate with their
+ * server.
+ */
+function _uc_paypoint_authentication($parameters) {
+  $format = variable_get('uc_paypoint_authentication_fields', 'trans_id:amount:callback');
+  $fields = explode(':', $format);
+  foreach ($fields as $field) {
+    $args[] = $field .'='. $parameters[$field];
+  }
+  $args[] = variable_get('uc_paypoint_digest_key', '');
+  $unhashed = implode('&', $args);
+  $hashed = md5($unhashed);
+  $match = ($parameters['hash'] === $hashed) ? TRUE : FALSE;
+  return array('hash' => $hashed, 'match' => $match);
+}
+
+/**
+ * Creates the digest parameter to send to PayPoint to let them know the
+ * transaction is authentic.
+ */
+function _uc_paypoint_create_digest_parameter($order) {
+  $remote_password = variable_get('uc_paypoint_remote_password', '');
+  $order_total = (!strpos($order->order_total, '.')) ? $order->order_total .'.00' : $order->order_total;
+  $unhashed = $order->order_id . $order_total . $remote_password;
+  $hashed = md5($unhashed);
+  return $hashed;
+}
+
+function uc_paypoint_cancel() {
+  unset($_SESSION['cart_order']);
+  drupal_set_message(t('Your PayPoint payment was cancelled. Please feel free to continue shopping or contact us for assistance.'));
+  drupal_goto('cart');
+}
+
+function _uc_paypoint_cv2avs_message($code) {
+  switch ($code) {
+    case "ALL MATCH":
+      return t('All the data provided matched that which the card issuer had on record.');
+    case "SECURITY CODE MATCH ONLY":
+      return t('Only the security code matched.');
+    case "ADDRESS MATCH ONLY":
+      return t('Only the address matched.');
+    case "NO DATA MATCHES":
+      return t('None of the data matched.');
+    case "DATA NOT CHECKED":
+      return t('The cv2avs system is unavailable or not supported by this card issuer.');
+    case "PARTIAL ADDRESS MATCH / POSTCODE":
+      return t('The postcode matched but the address did not.');
+    case "PARTIAL ADDRESS MATCH / ADDRESS":
+      return t('The address matched but the postcode did not.');
+    case "SECURITY CODE MATCH / POSTCODE":
+      return t('The security code and postcodes matched but the address did not');
+    case "SECURITY CODE MATCH / ADDRESS":
+      return t('The security code and address matched but the postcode did not.');
+    default:
+      return t('Unkown error');
+  }
+}
+
+function _uc_paypoint_get_cv2avs_options() {
+  return drupal_map_assoc(array(
+    'ALL MATCH',
+    'SECURITY CODE MATCH ONLY',
+    'ADDRESS MATCH ONLY',
+    'NO DATA MATCHES',
+    'DATA NOT CHECKED',
+    'PARTIAL ADDRESS MATCH / POSTCODE',
+    'PARTIAL ADDRESS MATCH / ADDRESS',
+    'SECURITY CODE MATCH / POSTCODE',
+    'SECURITY CODE MATCH / ADDRESS',
+  ));
+}
+
+/**
+ * This parameter is only returned when a transaction is declined and code = N.
+ * It is a failure code sent from the bank and should *not* be displayed to the
+ * cardholder.
+ */
+function _uc_paypoint_response_code($code) {
+  if (is_numeric($code)) {
+    switch ($code) {
+      case 2:
+      case 83:
+        return t('Referral. It may be possible to obtain an authorisation code from the bank over the phone.');
+      case 5:
+      case 54:
+        return t('Not authorised by the bank.');
+      case 30:
+      default:
+        return t('General error (retry after 1 minute may succeed, depending on the error).');
+    }
+  }
+}
+
+function _uc_paypoint_authorisation_code($parameters) {
+  switch ($parameters['code']) {
+    case "A":
+      return t('Transaction authorised by bank. Authorisation code !auth_code available as bank reference.', array('!auth_code' => $parameters['auth_code']));
+    case "N":
+      return t('Transaction not authorised.');
+    case "C":
+      return t('Communication problem. Trying again later may well work');
+    case "P:A":
+      return t('Pre-bank checks. Amount not supplied or invalid.');
+    case "P:X":
+      return t('Pre-bank checks. Not all mandatory parameters supplied.');
+    case "P:P":
+      return t('Pre-bank checks. Same payment presented twice.');
+    case "P:S":
+      return t('Pre-bank checks. Start date invalid.');
+    case "P:E":
+      return t('Pre-bank checks. Expiry date invalid.');
+    case "P:I":
+      return t('Pre-bank checks. Issue number invalid.');
+    case "P:C":
+      return t('Pre-bank checks. Card number fails LUHN check.');
+    case "P:T":
+      return t('Pre-bank checks. Card type invalid - i.e. does not match card number prefix.');
+    case "P:N":
+      return t('Pre-bank checks. Customer name not supplied.');
+    case "P:M":
+      return t('Pre-bank checks. Merchant does not exist or not registered yet.');
+    case "P:B":
+      return t('Pre-bank checks. Merchant account for card type does not exist.');
+    case "P:D":
+      return t('Pre-bank checks. Merchant account for this currency does not exist.');
+    case "P:V":
+      return t('Pre-bank checks. CV2 security code mandatory and not supplied / invalid.');
+    case "P:R":
+      return t('Pre-bank checks. Transaction timed out awaiting a virtual circuit. Merchant may not have enough virtual circuits for the volume of business..');
+    case "P:#":
+      return t('Pre-bank checks. No MD5 hash / token key set up against account.');
+  }
+}
+
+/**
+ * Returns an array of options for the currency selection widget.
+ */
+function _uc_paypoint_currency_codes() {
+  return drupal_map_assoc(array('AUD', 'CAD', 'EUR', 'GBP', 'HKD', 'JPY', 'USD'));
+}
+
+function uc_paypoint_debug($parameters, $order) {
+  $debug_mode = variable_get('uc_paypoint_debug', 'off');
+  $debug = t('Debugging order @order_id from PayPoint: <pre>@vars</pre>', array('@order_id' => $order->order_id, '@vars' => print_r($parameters, TRUE)));
+
+  switch ($debug_mode) {
+    case 'full':
+      $output .= $debug;
+      // Fallthrough
+    case 'log':
+      watchdog('PayPoint', $debug);
+      break;
+    case 'off': default:
+      continue;
+      break;
+  }
+
+  return $output;
+}
+
+function theme_uc_paypoint_cards() {
+  $image_path = drupal_get_path('module', 'uc_paypoint') .'/images/';
+
+  $card_types = array(
+    'visa' => 'Visa',
+    'delta' => 'Delta',
+    'electron' => 'Electron',
+    'mastercard' => 'Mastercard',
+    'maestro' => 'Maestro',
+    'solo' => 'Solo',
+    'amex' => 'AMEX',
+    'jbc' => 'JBC',
+    'laser' => 'Laser',
+    'paypoint' => 'Secure payment by PayPoint',
+  );
+  foreach ($card_types as $card => $title) {
+    $cards .= theme('image', $image_path . $card .'.gif', '', '', array('style' => 'position:relative; top:5px; margin-right:4px;'));
+  }
+
+  return $cards;
+}
