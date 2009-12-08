@@ -1,6 +1,14 @@
 <?php
 // $Id$
 
+/**
+ * @file
+ * Integrate PayPoint payment services with Ubercart.
+ *
+ * This module currently integrates the SECPage service and has
+ * been deployed on a very active Ubercart site.
+ */
+
 function uc_paypoint_uninstall() {
   db_query("DELETE FROM {variable} WHERE name LIKE 'uc_paypoint%'");
 }

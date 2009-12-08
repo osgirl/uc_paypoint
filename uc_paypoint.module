@@ -9,26 +9,37 @@
 /**
  * Implementation of hook_menu().
  */
-function uc_paypoint_menu($may_cache) {
-
-  if ($may_cache) {
-    $items[] = array(
-      'path' => 'uc_paypoint/complete',
-      'title' => t('PayPoint payment complete'),
-      'callback' => 'uc_paypoint_complete',
-      'access' => user_access('access content'),
-      'type' => MENU_CALLBACK,
-    );
-    $items[] = array(
-      'path' => 'uc_paypoint/cancel',
-      'title' => t('PayPoint payment cancelled'),
-      'callback' => 'uc_paypoint_cancel',
-      'access' => user_access('access content'),
-      'type' => MENU_CALLBACK,
-    );
-  }
-
+function uc_paypoint_menu() {
+  $items['uc_paypoint/complete'] = array(
+    'title' => 'PayPoint payment complete',
+    'page callback' => 'uc_paypoint_complete',
+    'access arguments' => array('access content'),
+    'type' => MENU_CALLBACK,
+  );
+  $items['uc_paypoint/cancel'] = array(
+    'title' => 'PayPoint payment cancelled',
+    'page callback' => 'uc_paypoint_cancel',
+    'access arguments' => array('access content'),
+    'type' => MENU_CALLBACK,
+  );
+  $items['cart/paypoint/finalize'] = array(
+    'title' => 'Order complete',
+    'page callback' => 'uc_paypoint_finalize',
+    'access arguments' => array('access content'),
+    'type' => MENU_CALLBACK,
+  );
   return $items;
+}
+ 
+/**
+ * Implementation of hook_ucga_display().
+ */
+function uc_paypoint_ucga_display() {
+  // Tell UC Google Analytics to display the e-commerce JS on the custom
+  // order completion page for this module.
+  if (arg(0) == 'cart' && arg(1) == 'paypoint' && arg(2) == 'finalize') {
+    return TRUE;
+  }
 }
 
 /**
@@ -46,7 +57,7 @@ function uc_paypoint_payment_method() {
   $methods[] = array(
     'id' => 'paypoint',
     'name' => t('PayPoint'),
-    'title' => $cards,
+    'title' => t('PayPoint'),
     'review' => t('PayPoint'),
     'desc' => t('Redirect users to submit payments through PayPoint.'),
     'callback' => 'uc_payment_method_paypoint',
@@ -68,7 +79,7 @@ function uc_payment_method_paypoint($op, &$arg1) {
       if (empty($trans_id)) {
         $trans_id = t('Unknown');
       }
-      return t('Transaction ID:<br>!trans_id', array('!trans_id' => $trans_id));
+      return t('Transaction ID:<br />!trans_id', array('!trans_id' => $trans_id));
 
     case 'settings':
       $form['uc_paypoint_merchant'] = array(
@@ -236,7 +247,7 @@ transaction and freeze the funds in the customer\'s account. A new authorisation
 /**
  * Implementation of hook_form_alter().
  */
-function uc_paypoint_form_alter($form_id, &$form) {
+function uc_paypoint_form_alter(&$form, $form_state, $form_id) {
   if ($form_id == 'uc_cart_checkout_review_form' && ($order_id = intval($_SESSION['cart_order'])) > 0) {
     $order = uc_order_load($order_id);
 
@@ -273,7 +284,7 @@ function uc_paypoint_form_alter($form_id, &$form) {
       }
       if (variable_get('uc_paypoint_allow_back', 1)) {
         $data += array(
-          'backcallback' => url('uc_paypoint/cancel', NULL, NULL, TRUE),
+          'backcallback' => url('uc_paypoint/cancel', array('absolute' => TRUE)),
           'show_back' => 'back',
         );
       }
@@ -384,11 +395,11 @@ function uc_paypoint_complete($cart_id = 0) {
     $order = uc_order_load($parameters['trans_id']);
     if ($order->payment_method != 'paypoint' && uc_order_status_data($order->order_status, 'state') != 'in_checkout') {
       $output .= t('We were unable to process your payment. Please verify your details and try again. If the problem persists, please contact us. Many thanks. <a href="mailto:!email">!email</a>', array('!email' => variable_get('uc_store_email', '')));
-      watchdog('PayPoint', t('PayPoint order attempted for !trans_id.', array('!trans_id' => $parameters['trans_id'])), WATCHDOG_WARNING);
+      watchdog('PayPoint', 'PayPoint order attempted for !trans_id.', array('!trans_id' => $parameters['trans_id']), WATCHDOG_WARNING);
       exit;
     }
     else {
-      watchdog('PayPoint', t('Callback received for order !order_id.', array('!order_id' => $order->order_id)), WATCHDOG_NOTICE, l(t('order !order_id', array('!order_id' => $order->order_id)), 'admin/store/orders/'. $parameters['uid'] .'/'. $order->order_id));
+      watchdog('PayPoint', 'Callback received for order !order_id.', array('!order_id' => $order->order_id), WATCHDOG_NOTICE, l(t('order !order_id', array('!order_id' => $order->order_id)), 'admin/store/orders/'. $parameters['uid'] .'/'. $order->order_id));
     }
   }
   // If the trans_id is not set we assume there was an error and abort processing.
@@ -417,8 +428,8 @@ function uc_paypoint_complete($cart_id = 0) {
       uc_payment_enter($order->order_id, 'paypoint', $parameters['amount'], 0, NULL, $comment);
       uc_order_comment_save($order->order_id, 0, t('Order created through website.'), 'admin');
       // TODO: uc_cart_complete_sale() doesn't seem to be able to detect whether the user is logged in from the callback page.
-      $output .= uc_cart_complete_sale($order);
-      uc_cart_empty($parameters['cart_id']);
+      //$output .= uc_cart_complete_sale($order);
+      //uc_cart_empty($parameters['cart_id']);
       break;
 
     case 'N': // Payment not authorised by the bank.
@@ -447,11 +458,10 @@ function uc_paypoint_complete($cart_id = 0) {
     uc_order_comment_save($order->order_id, 0, $cv2avs_message, 'admin');
   }
 
-  print uc_paypoint_debug($parameters, $order);
-  print $output;
-  //drupal_set_message($output);
-  //drupal_goto('<front>');
-
+  $url = 'cart/paypoint/finalize/'. $order->order_id;
+  $redirect = '<script type="text/javascript">window.location = "'. url($url, array('absolute' => TRUE)) .'";</script>';
+  print $redirect;
+  exit();
 }
 
 /**
@@ -459,7 +469,7 @@ function uc_paypoint_complete($cart_id = 0) {
  */
 function uc_paypoint_get_callback() {
   global $base_url;
-  $callback = $base_url . '/uc_paypoint/complete';
+  $callback = $base_url .'/uc_paypoint/complete';
   if (!variable_get('uc_paypoint_callback_ssl', 0)) {
     $callback = str_replace('https://', 'http://', $callback);
   }
@@ -648,6 +658,27 @@ function theme_uc_paypoint_cards() {
     $cards .= theme('image', $image_path . $card .'.gif', '', '', array('style' => 'position:relative; top:5px; margin-right:4px;'));
   }
   $output = $power_by_paypoint . $cards;
+
+  return $output;
+}
+
+function _uc_paypoint_boolean_to_string($input) {
+  return ($input) ? 'true' : 'false';
+}
+
+function uc_paypoint_finalize() {
+  $order = uc_order_load(arg(3));
+
+  // Add a comment to let sales team know this came in through the site.
+  uc_order_comment_save($order->order_id, 0, t('Order created through website.'), 'admin');
+
+  $output = uc_cart_complete_sale($order, variable_get('uc_new_customer_login', FALSE));
+
+  $page = variable_get('uc_cart_checkout_complete_page', '');
+
+  if (!empty($page)) {
+    drupal_goto($page);
+  }
 
   return $output;
 }
