@@ -216,6 +216,16 @@ transaction and freeze the funds in the customer\'s account. A new authorisation
         '#default_value' => variable_get('uc_paypoint_send_email', 1),
         '#description' => t('When sending the email address to PayPoint, PayPoint will send a payment confirmation email to the customer.'),
       );
+	  $form['uc_paypoint_attach_merchant'] = array(
+        '#type' => 'checkbox',
+        '#title' => t('Send order to merchant as an attachment'),
+        '#default_value' => variable_get('uc_paypoint_attach_merchant', 1),
+      );
+      $form['uc_paypoint_attach_customer'] = array(
+        '#type' => 'checkbox',
+        '#title' => t('Send order to customer as an attachment'),
+        '#default_value' => variable_get('uc_paypoint_attach_customer', 1),
+      );
       $form['uc_paypoint_authentication_fields'] = array(
         '#type' => 'textfield',
         '#title' => t('Authentication fields'),
