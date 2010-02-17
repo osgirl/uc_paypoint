@@ -27,10 +27,11 @@ function uc_paypoint_menu() {
     'page callback' => 'uc_paypoint_finalize',
     'access arguments' => array('access content'),
     'type' => MENU_CALLBACK,
+
   );
+  
   return $items;
 }
- 
 /**
  * Implementation of hook_ucga_display().
  */
@@ -216,7 +217,7 @@ transaction and freeze the funds in the customer\'s account. A new authorisation
         '#default_value' => variable_get('uc_paypoint_send_email', 1),
         '#description' => t('When sending the email address to PayPoint, PayPoint will send a payment confirmation email to the customer.'),
       );
-	  $form['uc_paypoint_attach_merchant'] = array(
+      $form['uc_paypoint_attach_merchant'] = array(
         '#type' => 'checkbox',
         '#title' => t('Send order to merchant as an attachment'),
         '#default_value' => variable_get('uc_paypoint_attach_merchant', 1),
@@ -265,7 +266,7 @@ function uc_paypoint_form_alter(&$form, $form_state, $form_id) {
       $data = array(
         'merchant' => variable_get('uc_paypoint_merchant', 'abcdef01'),
         'trans_id' => $order->order_id,
-        'amount' => (!strpos($order->order_total, '.')) ? $order->order_total .'.00' : $order->order_total,
+        'amount' => uc_currency_format($order->order_total, FALSE, FALSE, '.'),
         'callback' => uc_paypoint_get_callback(),
         'currency' => variable_get('uc_paypoint_currency', 'GBP'),
         'dups' => (variable_get('uc_paypoint_duplicate_checking', 0) === 1) ? 'false' : 'true',
@@ -341,27 +342,21 @@ function uc_paypoint_form_alter(&$form, $form_state, $form_id) {
       }
 
       $form['#action'] = 'https://www.secpay.com/java-bin/ValCard';
+      // Remove default "Back" button and use custom one
+      // This is so that the form is redirected to the correct page depending
+      // which button the user clicked.
+      unset($form['back']);
+      $form['#prefix'] = drupal_get_form('uc_paypoint_checkout_form_back', $form_state);
 
       // Add the items in the array to the form as hidden input fields
       foreach ($data as $name => $value) {
         $form[$name] = array('#type' => 'hidden', '#value' => $value);
       }
 
-      //
-      // // Specify whether order confirmation details sent to the cardholder
-      // // should be emailed inline or as an attachment.
-      //       // 'true' = send as attachment (default)
-      //       // 'false' = send inline
-      // $form['mail_attach_customer'] = array('#type' => 'hidden', '#value' => 'true');
-      // // Same as mail_attach_customer but relates to order confirmation emails sent to the Merchant.
-      // $form['mail_attach_merchant'] = array('#type' => 'hidden', '#value' => 'true');
-      //
       // // Specify whether to send order confirmation to the customer.
       // //   'true' = send to bill_email
       // //   'false' = don't send
-      // //   'bill' = send to bill_email
-      // //   'ship' = send to ship_email
-      // $form['mail_customer'] = array('#type' => 'hidden', '#value' => 'true'); // default
+      //$form['mail_customer'] = array('#type' => 'hidden', '#value' => 'false');
       //
       // // A colon separated list of merchant email recipients to override
       // // default setup in Custom Account at PayPoint. A single colon will stop
@@ -376,16 +371,24 @@ function uc_paypoint_form_alter(&$form, $form_state, $form_id) {
       //
       // // Sets the subject line on order confirmation emails.
       // $form['mail_subject'] = array('#type' => 'hidden', '#value' => 'Subject line of email.');
-      //
-      // // Allows mapping of existing field names to their PayPoint equivalents.
-      // // Use cb_flds to make new fields appear in the callback and expose to
-      // // card payment template.
+
+      // Specify whether order confirmation details sent to the cardholder
+      $attach_customer =  _uc_paypoint_boolean_to_string(variable_get('uc_paypoint_attach_customer', 1));
+      $attach_merchant =  _uc_paypoint_boolean_to_string(variable_get('uc_paypoint_attach_merchant', 1));
+      $form['mail_attach_customer'] = array('#type' => 'hidden', '#value' => $attach_customer);
+      $form['mail_attach_merchant'] = array('#type' => 'hidden', '#value' => $attach_merchant);
+
+      // Allows mapping of existing field names to their PayPoint equivalents.
+      // Use cb_flds to make new fields appear in the callback and expose to
+      // card payment template.
       // $form['map_flds'] = array('#type' => 'hidden', '#value' => 'amount=order_total:auth_code=bank_auth_code');
     }
   }
 }
 
 function uc_paypoint_complete($cart_id = 0) {
+
+
   // Construct a new array to hold all our cleaned data as the number of values in POST can vary
   foreach ($_POST as $name => $value) {
     $parameters[check_plain($name)] = check_plain($value);
@@ -462,16 +465,17 @@ function uc_paypoint_complete($cart_id = 0) {
 
   $message .= _uc_paypoint_authorisation_code($parameters);
   watchdog('PayPoint', $message, WATCHDOG_NOTICE);
-  
+
   if (isset($parameters['cv2avs'])) {
     $cv2avs_message = t('CV2AVS message: ') . _uc_paypoint_cv2avs_message($parameters['cv2avs']);
     uc_order_comment_save($order->order_id, 0, $cv2avs_message, 'admin');
   }
 
-  $url = 'cart/paypoint/finalize/'. $order->order_id;
-  $redirect = '<script type="text/javascript">window.location = "'. url($url, array('absolute' => TRUE)) .'";</script>';
-  print $redirect;
-  exit();
+$url = 'cart/paypoint/finalize/'. $order->order_id;
+$redirect = '<script type="text/javascript">window.location = "'. url($url, array('absolute' => TRUE)) .'";</script>';
+print $redirect;
+exit();
+
 }
 
 /**
@@ -510,7 +514,7 @@ function _uc_paypoint_authentication($parameters) {
 function _uc_paypoint_create_digest_parameter($order) {
   $remote_password = variable_get('uc_paypoint_remote_password', '');
   # handle case where order total doesn't have decimal value
-  $order_total = (!strpos($order->order_total, '.')) ? $order->order_total .'.00' : $order->order_total;
+  $order_total = uc_currency_format($order->order_total, FALSE, FALSE, '.');
   $unhashed = $order->order_id . $order_total . $remote_password;
   $hashed = md5($unhashed);
   return $hashed;
@@ -652,7 +656,7 @@ function uc_paypoint_debug($parameters, $order) {
 function theme_uc_paypoint_cards() {
   $image_path = drupal_get_path('module', 'uc_paypoint') .'/images/';
   $title = variable_get('uc_paypoint_title', t('PayPoint'));
-  $power_by_paypoint = theme('image', $image_path .'powered-by-paypoint.png', $title, $title);
+  $power_by_paypoint = theme('image', $image_path .'powered-by-paypoint.png', $title .': ', $title, array('style' => 'position:relative; top:6px;'));
   $card_types = array(
     'visa' => 'Visa',
     'delta' => 'Delta',
@@ -691,4 +695,21 @@ function uc_paypoint_finalize() {
   }
 
   return $output;
+}
+
+/**
+ * Form that overwrites default "Back" button which makes sure that
+ * the user is taken back to order checkout instead of PayPoint payment site.
+ */
+function uc_paypoint_checkout_form_back() {
+  $form = array();
+  
+  $form['#action'] = '/cart/checkout';
+  
+  $form['back'] = array(
+    '#type' => 'submit',
+    '#value' => t('Back'),
+  );
+  
+  return $form;
 }
