@@ -299,6 +299,42 @@ function uc_paypoint_form_alter(&$form, $form_state, $form_id) {
           'show_back' => 'back',
         );
       }
+	  // Send order details to PayPoint.
+      if (variable_get('uc_paypoint_attach_merchant', 1)) {
+        $xml_order = "<order class='com.secpay.seccard.Order'><orderLines class='com.secpay.seccard.OrderLine'>";
+        foreach ($order->products as $product) {
+          $xml_order .= "<OrderLine><prod_code>$product->title ($product->model) ";
+          if (!empty($product->data['attributes'])) {
+            foreach ($product->data['attributes'] as $attribute => $selection) {
+              $xml_order .= " - $attribute: $selection[0],";
+            }
+          }
+          $xml_order .= "</prod_code><item_amount>$product->price</item_amount><quantity>$product->qty</quantity></OrderLine>";
+        }
+        $comments = uc_order_comments_load($order_id);
+        if (is_array($comments)) {
+          $xml_order .= '<OrderLine><prod_code>COMMENTS - '.$comments[0]->message. '</prod_code></OrderLine>';
+        }
+        foreach ($order->line_items as $line_item) {
+          switch ($line_item['type']) {
+            case 'shipping':
+              $title = 'SHIPPING';
+              break;
+            case 'uc_discounts':
+              $title = 'DISCOUNT';
+              break;
+            default:
+              $title = NULL;
+              break;
+          }
+          if (!is_null($title)) {
+            $xml_order .= "<OrderLine><prod_code>$title</prod_code><item_amount>" . abs($line_item['amount']) . '</item_amount></OrderLine>';
+          }
+        }
+        $xml_order .= '</orderLines></order>';
+        $data += array('order'  =>  $xml_order, );
+      }
+
       // Address fields
       if (variable_get('uc_paypoint_send_billing', 1)) {
         $data += array(
