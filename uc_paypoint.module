@@ -276,6 +276,7 @@ function uc_paypoint_form_alter(&$form, $form_state, $form_id) {
         'template' => variable_get('uc_paypoint_template', ''),
         'cb_post' => variable_get('uc_paypoint_request_method', 'true'),
         'test_status' => variable_get('uc_paypoint_test_status', 'true'),
+        'deferred' => variable_get('uc_paypoint_deferred_transactions', 'false'),
         // Custom fields sent to PayPoint for use in the callback and in the card
         // payment template as e.g. ${uid}
         'cb_flds' => 'uid:cart_id',
