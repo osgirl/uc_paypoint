@@ -1,5 +1,4 @@
 <?php
-// $Id$
 /**
  * @file
  * Theem functions for UC Paypoint.

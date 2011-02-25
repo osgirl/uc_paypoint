@@ -1,4 +1,3 @@
-; $Id$
 name = PayPoint
 description = Integrates the PayPoint payment processing service.
 dependencies[] = uc_payment
