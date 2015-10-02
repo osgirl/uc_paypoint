@@ -5,8 +5,10 @@
  * Integrates the PayPoint payment processing service with Ubercart.
  */
 
+
+
 /**
- * Implementation of hook_menu().
+ * Implements hook_menu().
  */
 function uc_paypoint_menu() {
   $items['admin/store/orders/%uc_order/paypoint'] = array(
@@ -23,17 +25,32 @@ function uc_paypoint_menu() {
   return $items;
 }
 
+
+
 /**
- * Implementation of hook_perm().
+ * Implements hook_permission().
  */
-function uc_paypoint_perm() {
-  return array('administer paypoint', 'process paypoint', 'view paypoint credit card numbers');
+function uc_paypoint_permission() {
+  return array(
+    'administer paypoint' => array(
+      'title' => t('administer paypoint'),
+      'description' => t('TODO Add a description for \'administer paypoint\''),
+    ),
+    'process paypoint' => array(
+      'title' => t('process paypoint'),
+      'description' => t('TODO Add a description for \'process paypoint\''),
+    ),
+    'view paypoint credit card numbers' => array(
+      'title' => t('view paypoint credit card numbers'),
+      'description' => t('TODO Add a description for \'view paypoint credit card numbers\''),
+    ),
+  );
 }
 
 /**
- * Implementation of hook_payment_method().
+ * Implements hook_uc_payment_method().
  */
-function uc_paypoint_payment_method() {
+function uc_paypoint_uc_payment_method() {
   $cards = theme('uc_paypoint_cards');
   $logo = theme('uc_paypoint_logo');
   $methods[] = array(
@@ -51,16 +68,16 @@ function uc_paypoint_payment_method() {
 }
 
 /**
- * Implementation of hook_theme().
+ * Implements hook_theme().
  */
 function uc_paypoint_theme() {
   return array(
     'uc_paypoint_cards' => array(
-      'arguments' => array(),
+      'variables' => array(),
       'file' => 'uc_paypoint.theme.inc',
     ),
     'uc_paypoint_logo' => array(
-      'arguments' => array(),
+      'variables' => array(),
       'file' => 'uc_paypoint.theme.inc',
     ),
   );
@@ -69,24 +86,28 @@ function uc_paypoint_theme() {
 /**
  * Callback function for the PayPoint payment method.
  */
-function uc_payment_method_paypoint($op, &$arg1) {
-  $trans_id = $arg1->order_id;
+/* function uc_payment_method_paypoint($op, &$arg1) { */
+function uc_payment_method_paypoint($op, &$order, $form = NULL, $form_state = NULL) {
+  $trans_id = $order->order_id;
   if (empty($trans_id)) {
     $trans_id = t('Unknown');
   }
   switch ($op) {
     case 'cart-details':
-      $details = drupal_get_form('uc_paypoint_credit_form', $arg1);
-      return uc_strip_form($details);
+	$details = uc_paypoint_credit_form(array(), $form_state, $order);
+	//$details = drupal_build_form('uc_paypoint_credit_form',&$form_state, $order);
+	//watchdog('PayPoint', array('@details' => print_r($details)));
+	 return $details;
     case 'cart-review':
-      $review[] = array('title' => t('Card Type'), 'data' => check_plain($arg1->payment_details['cc_type']));
-      $review[] = array('title' => t('Card Owner'), 'data' => check_plain($arg1->payment_details['cc_owner']));
-      $review[] = array('title' => t('Card Number'), 'data' => uc_credit_display_number($arg1->payment_details['cc_number']));
-      $start = $arg1->payment_details['cc_start_month'] . '/' . $arg1->payment_details['cc_start_year'];
+	//	print_r($order);
+      $review[] = array('title' => t('Card Type'), 'data' => check_plain($order->payment_details['cc_type']));
+      $review[] = array('title' => t('Card Owner'), 'data' => check_plain($order->payment_details['cc_owner']));
+      $review[] = array('title' => t('Card Number'), 'data' => uc_credit_display_number($order->payment_details['cc_number']));
+      $start = $order->payment_details['cc_start_month'] . '/' . $order->payment_details['cc_start_year'];
       $review[] = array('title' => t('Start Date'), 'data' => strlen($start) > 1 ? $start : '');
-      $review[] = array('title' => t('Expiration'), 'data' => $arg1->payment_details['cc_exp_month'] .'/'. $arg1->payment_details['cc_exp_year']);
-      $review[] = array('title' => t('Issue Number'), 'data' => user_access('view cc numbers') ? $arg1->payment_details['cc_issue'] : str_repeat('-', strlen($arg1->payment_details['cc_issue'])));
-      $review[] = array('title' => t('CVV'), 'data' => user_access('view cc numbers') ? $arg1->payment_details['cc_cvv'] : str_repeat('-', strlen($arg1->payment_details['cc_cvv'])));
+      $review[] = array('title' => t('Expiration'), 'data' => $order->payment_details['cc_exp_month'] . '/' . $order->payment_details['cc_exp_year']);
+      $review[] = array('title' => t('Issue Number'), 'data' => user_access('view cc numbers') ? $order->payment_details['cc_issue'] : str_repeat('-', strlen($order->payment_details['cc_issue'])));
+      $review[] = array('title' => t('CVV'), 'data' => user_access('view cc numbers') ? $order->payment_details['cc_cvv'] : str_repeat('-', strlen($order->payment_details['cc_cvv'])));
       return $review;
     case 'edit-process':
       $cache = uc_credit_cache('load');
@@ -110,9 +131,9 @@ function uc_payment_method_paypoint($op, &$arg1) {
       return $changes;
     case 'order-view':
       $output =  t('Transaction ID: @trans_id', array('@trans_id' => $trans_id));
-//      if (user_access('process papypoint') && is_numeric($trans_id) && !_uc_paypoint_order_empty($arg1)) { TODO
+      //      if (user_access('process papypoint') && is_numeric($trans_id) && !_uc_paypoint_order_empty($order)) { TODO
       if (user_access('process papypoint') && is_numeric($trans_id)) {
-        $output .= '<br />' . l(t('PayPoint terminal'), 'admin/store/orders/'. $trans_id .'/paypoint');
+        $output .= '<br />' . l(t('PayPoint terminal'), 'admin/store/orders/' . $trans_id . '/paypoint');
       }
       else {
         $output .= '<br />' . t('Make sure to fill all the order details in order to process payments.');
@@ -122,10 +143,23 @@ function uc_payment_method_paypoint($op, &$arg1) {
       // Unfortunately submit handlers on the checkout form do not handle the credit card details, so
       // we are forced to look at the POST directly. Very similar to uc_credit.
 
+	  /* If no Credit Card Number is submitted do nothing - Contrib By JD */
+	   if (!isset($form_state['values']['panes']['payment']['details']['cc_number'])) {
+        return;
+      }
+
+	  /* Grab Paypoint Credit card data and ensure, remove any spaces from
+	  credit card details and make sure all array values are plain text  -  New Code contributed by JD */
+	  $paypoint_cc_data = $form_state['values']['panes']['payment']['details'];
+      $paypoint_cc_data['cc_number'] = str_replace(' ', '', $paypoint_cc_data['cc_number']);
+      array_walk($paypoint_cc_data, 'check_plain');
+
+	  /* D6 Code
+
       $paypoint_cc_data = array(
         'cc_type' => check_plain($_POST['cc_type']),
         'cc_owner' => check_plain($_POST['cc_owner']),
-        'cc_number' => check_plain(str_replace(' ', '',  $_POST['cc_number'])),
+        'cc_number' => check_plain(str_replace(' ', '',   $_POST['cc_number'])),
         'cc_start_month' => check_plain($_POST['cc_start_month']),
         'cc_start_year' => check_plain($_POST['cc_start_year']),
         'cc_exp_month' => check_plain($_POST['cc_exp_month']),
@@ -134,10 +168,19 @@ function uc_payment_method_paypoint($op, &$arg1) {
         'cc_cvv' => check_plain($_POST['cc_cvv']),
       );
 
+	  */
+
+	  /* Recover cached CC data if it exists- New code contributed by JD */
+	  if (isset($form_state['values']['panes']['payment']['details']['payment_details_data'])) {
+        $cache = uc_credit_cache('save', $form_state['values']['panes']['payment']['details']['payment_details_data']);
+      }
+
+	  /* D6 code
       // Recover cached CC data in $_POST if it exists, this comes from the form itself.
       if (isset($_POST['payment_details_data'])) {
         $cache = uc_credit_cache('save', $_POST['payment_details_data']);
       }
+	 */
 
       // Account for partial CC numbers when masked by the system.
       if (substr($paypoint_cc_data['cc_number'], 0, strlen(t('(Last4)'))) == t('(Last4)')) {
@@ -161,15 +204,25 @@ function uc_payment_method_paypoint($op, &$arg1) {
         }
       }
 
-      $arg1->payment_details = $paypoint_cc_data;
-      $return = uc_paypoint_card_validate($paypoint_cc_data);
+      $order->payment_details = $paypoint_cc_data;
 
+
+	  /* If the CC details have not been entered, don't validate. Else go ahead and validate :-)
+
+     //
+      */
+
+	  if (empty($paypoint_cc_data['cc_cvv']) && empty($paypoint_cc_data['cc_owner']) && empty($paypoint_cc_data['cc_start_month']) && empty($paypoint_cc_data['cc_start_month']) && empty($paypoint_cc_data['cc_start_year']) && empty($paypoint_cc_data['cc_issue'])) {
+	  $return = TRUE;
+	  } else {
+	  $return = uc_paypoint_card_validate($paypoint_cc_data);
+	  }
       // Initialize the encryption key and class.
       $key = uc_credit_encryption_key();
-      $crypt = new uc_encryption_class;
+      $crypt = new UbercartEncryption();
 
       // Store the encrypted details in the session for the next pageload.
-      $_SESSION['paypoint_crd'] = $crypt->encrypt($key, serialize($arg1->payment_details));
+      $_SESSION['paypoint_crd'] = $crypt->encrypt($key, serialize($order->payment_details));
 
       // Log any errors to the watchdog.
       uc_store_encryption_errors($crypt, 'uc_credit');
@@ -182,7 +235,7 @@ function uc_payment_method_paypoint($op, &$arg1) {
 
       return $return;
     case 'order-details':
-//      if (is_numeric($trans_id) && !_uc_paypoint_order_empty($arg1)) {
+      //      if (is_numeric($trans_id) && !_uc_paypoint_order_empty($order)) {
       if (is_numeric($trans_id)) {
         $output = t('Use the !link to process PayPoint payments.', array('!link' => l(t('PayPoint terminal'), 'admin/store/orders/' . $trans_id . '/paypoint')));
       }
@@ -207,32 +260,32 @@ function uc_paypoint_card_validate($card_data) {
   }
 
   // Validate the CC number if that's turned on/check for non-digits.
-  if (!_valid_card_number($card_data['cc_number']) || !ctype_digit($card_data['cc_number'])) {
+  if (!_uc_credit_valid_card_number($card_data['cc_number']) || !ctype_digit($card_data['cc_number'])) {
     drupal_set_message(t('You have entered an invalid credit card number.'), 'error');
     $return = FALSE;
   }
 
   // Validate the start date (if entered).
-  if (!_valid_card_start($card_data['cc_start_month'], $card_data['cc_start_year'])) {
+  if (!_uc_credit_valid_card_start($card_data['cc_start_month'], $card_data['cc_start_year'])) {
     drupal_set_message(t('The start date you entered is invalid.'), 'error');
     $return = FALSE;
   }
 
   // Validate the card expiration date.
-  if (!_valid_card_expiration($card_data['cc_exp_month'], $card_data['cc_exp_year'])) {
+  if (!_uc_credit_valid_card_expiration($card_data['cc_exp_month'], $card_data['cc_exp_year'])) {
     drupal_set_message(t('The credit card you entered has expired.'), 'error');
     $return = FALSE;
   }
 
   // Validate the issue number (if entered).  With issue numbers, '01' is
   // different from '1', but is_numeric() is still appropriate.
-  if (!_valid_card_issue($card_data['cc_issue'])) {
+  if (!_uc_credit_valid_card_issue($card_data['cc_issue'])) {
     drupal_set_message(t('The issue number you entered is invalid.'), 'error');
     $return = FALSE;
   }
 
   // Validate the CVV number if enabled.
-  if (!_valid_cvv($card_data['cc_cvv'])) {
+  if (!_uc_credit_valid_cvv($card_data['cc_cvv'])) {
     drupal_set_message(t('You have entered an invalid CVV number.'), 'error');
     $return = FALSE;
   }
@@ -274,8 +327,8 @@ function uc_paypoint_settings_form() {
   $form['uc_paypoint_test_status'] = array(
     '#type' => 'select',
     '#title' => t('Test status'),
-    '#description' => t('"Test" mode will simulate an authorised callback without contacting the bank, 
-      "Auto-decline" will simulate a declined callback without contacting the bank, and "Live" will send the transaction 
+    '#description' => t('"Test" mode will simulate an authorised callback without contacting the bank,
+      "Auto-decline" will simulate a declined callback without contacting the bank, and "Live" will send the transaction
       to the bank for authorization.'),
     '#options' => array(
       'true' => t('Test'),
@@ -287,16 +340,16 @@ function uc_paypoint_settings_form() {
   $form['uc_paypoint_deferred_transactions'] = array(
     '#type' => 'select',
     '#title' => t('Deferred payments'),
-    '#description' => t('Deferred transactions are useful if you want to take orders for items that you cannot always 
-      guarantee will be in stock. Using deferred transactions, you can take an initial authorisation 
-        (at which point no money has actually been taken) and then when your product arrives in stock you can release 
-        the funds for the deferred transaction and then ship the product out to your customer. <ul><li>"Defer" will 
-        authorise only one unit of currency. This is useful for avoiding tying up funds in your customer\'s account 
+    '#description' => t('Deferred transactions are useful if you want to take orders for items that you cannot always
+      guarantee will be in stock. Using deferred transactions, you can take an initial authorisation
+        (at which point no money has actually been taken) and then when your product arrives in stock you can release
+        the funds for the deferred transaction and then ship the product out to your customer. <ul><li>"Defer" will
+        authorise only one unit of currency. This is useful for avoiding tying up funds in your customer\'s account
         if all you want to do is "get their details into the system".</li><li>"Full" will authorise the full amount of the
-        transaction and freeze the funds in the customer\'s account. A new authorisation takes place when funds are 
-        released so be careful not to ship goods before confirming release of funds.</li><li>"Reuse" will authorise 
-        the full amount of the initial transaction but on release will use the original authorisation code 
-        (which was obtained by the initial deferred transaction - if it is still valid.) 
+        transaction and freeze the funds in the customer\'s account. A new authorisation takes place when funds are
+        released so be careful not to ship goods before confirming release of funds.</li><li>"Reuse" will authorise
+        the full amount of the initial transaction but on release will use the original authorisation code
+        (which was obtained by the initial deferred transaction - if it is still valid.)
         If not still valid, releasing will cause a new authorisation to take place (as is the casewith "Defer" and "Full").</li></ul>'),
     '#options' => array(
       'false' => t('Disabled'),
@@ -331,7 +384,7 @@ function uc_paypoint_settings_form() {
     '#type' => 'select',
     '#title' => t('Default cv2avs value'),
     '#multiple' => FALSE,
-    '#description' => t("This is the value for the cv2avs callback parameter returned by PayPoint's 
+    '#description' => t("This is the value for the cv2avs callback parameter returned by PayPoint's
       server when running in test mode."),
     '#options' => _uc_paypoint_get_cv2avs_options(),
     '#default_value' => variable_get('uc_paypoint_default_cv2avs', 'ALL MATCH'),
@@ -357,7 +410,7 @@ function uc_paypoint_settings_form() {
     '#type' => 'checkbox',
     '#title' => t('Send email address to PayPoint'),
     '#default_value' => variable_get('uc_paypoint_send_email', 1),
-    '#description' => t('When sending the email address to PayPoint, PayPoint will send a payment confirmation email 
+    '#description' => t('When sending the email address to PayPoint, PayPoint will send a payment confirmation email
       to the customer.'),
   );
   $form['uc_paypoint_attach_merchant'] = array(
@@ -379,27 +432,33 @@ function uc_paypoint_settings_form() {
   $form['uc_paypoint_debug'] = array(
     '#type' => 'select',
     '#title' => t('Debug mode'),
-    '#description' => t("Select the debug mode. 'Log' will log debug info to watchdog and 'Full' will interrupt 
+    '#description' => t("Select the debug mode. 'Log' will log debug info to watchdog and 'Full' will interrupt
       the checkout process and print debug info to the screen."),
     '#multiple' => FALSE,
     '#options' => array(
       'off' => 'Off',
       'log' => 'Log',
       'full' => 'Full',
-      ),
+    ),
     '#default_value' => variable_get('uc_paypoint_debug', 'off'),
   );
   return $form;
 }
 
+
 /**
- * Implementation of hook_form_alter().
+ * Implements hook_form_alter().
  */
-function uc_paypoint_form_alter(&$form, $form_state, $form_id) {
+function uc_paypoint_form_alter(&$form, &$form_state, $form_id) {
   if ($form_id == 'uc_cart_checkout_form') {
+  //This is evil but necessary for now.
+ // unset($form['#token']);
+//  $form['form_token'] = null;
     // Clear out the session variables.
-    
-    // Cache the CC details for use in other functions.
+
+
+
+	    // Cache the CC details for use in other functions.
     if (isset($_SESSION['paypoint_crd'])) {
       uc_credit_cache('save', $_SESSION['paypoint_crd']);
 
@@ -412,7 +471,7 @@ function uc_paypoint_form_alter(&$form, $form_state, $form_id) {
   }
 
   if ($form_id == 'uc_cart_checkout_review_form') {
-    // Check if the customer paid by CC and refreshed on the review page.
+   // Check if the customer paid by CC and refreshed on the review page.
     if (isset($_SESSION['uc_paypoint_cc_pay']) && !isset($_SESSION['paypoint_crd']) && empty($_POST['paypoint_crd'])) {
       // Send them back to the checkout form to put in their details again.
       drupal_set_message(t('To protect our customers from identity theft, credit card details are erased when a browser refreshes on the checkout review page. Please enter your card details again and re-submit the form.'), 'error');
@@ -442,7 +501,7 @@ function uc_paypoint_form_alter(&$form, $form_state, $form_id) {
 
     $form['#submit'] = $submit;
     // Clear the session of the details.
-    unset($_SESSION['paypoint_crd']);
+    // unset($_SESSION['paypoint_crd']);
   }
 }
 
@@ -475,16 +534,16 @@ function uc_paypoint_cart_review_post_form_submit($form, &$form_state) {
 }
 
 /**
- * Implementing hook_order().
+ * Implements hook_uc_order().
  *
  * We hook into the order submission, passing calling paypoint and into load
  * in order to get credit card details back from cache.
  */
-function uc_paypoint_order($op, &$order, $arg2) {
+function uc_paypoint_uc_order($op, &$order, $arg2) {
   switch ($op) {
     case 'submit': // User submitted the order after checkout review.
       $key = uc_credit_encryption_key();
-      $crypt = new uc_encryption_class;
+      $crypt = new UbercartEncryption();
       $order->payment_details = unserialize($crypt->decrypt($key, $_SESSION['paypoint_crd']));
       $results = uc_paypoint_xmlrpc_request($order);
       return uc_paypoint_complete_request($results);
@@ -506,13 +565,21 @@ function uc_paypoint_xmlrpc_request($order) {
   $parameters = _uc_paypoint_create_parameters($data);
   uc_paypoint_debug($parameters, $order);
 
+//added by muhammad mawji
+//watchdog('PayPoint', 'XML Request order details @order', array('@order' => print_r($parameters, TRUE)));
+
   $request = array();
   $request[] = 'https://www.secpay.com/secxmlrpc/make_call';
   $request[] = 'SECVPN.validateCardFull';
-  $request = array_merge($request, $parameters);
+// commented out by muhammad mawji - wrong function to use when mergin detals for xmlrpc function
+//  $request = array_merge($request, $parameters);
 
   // We call this way because of the large number of arguments.
-  $result = call_user_func_array('xmlrpc', $request);
+
+//commentout the below, call fundtion directly.
+  //$result = call_user_func_array('xmlrpc', $request);
+$result = xmlrpc($request[0], array($request[1]=>$parameters));
+
 
   if (empty($result)) { // Something went wrong with the remote call.
     $error = xmlrpc_error();
@@ -543,9 +610,9 @@ function uc_paypoint_complete_request($results) {
     }
     else {
       watchdog('PayPoint', 'Remote call results received for order @order_id.', array('@order_id' => $order->order_id), WATCHDOG_NOTICE,
-        l(t('Order @order_id', array('@order_id' => $order->order_id)), 'admin/store/orders/' . $user->uid . '/' . $order->order_id));
-     }
-   }
+      l(t('Order @order_id', array('@order_id' => $order->order_id)), 'admin/store/orders/' . $user->uid . '/' . $order->order_id));
+    }
+  }
   // If the trans_id is not set we assume there was an error and abort processing.
   else {
     if (isset($results['message'])) {
@@ -572,18 +639,30 @@ function uc_paypoint_complete_request($results) {
 
     case 'C': // Communication error.
     default:
-      drupal_set_message(t('A communication error occurred. Please try again later or contact us to complete your order !email', array('!email' => _uc_paypoint_store_email())), 'error');
+	  drupal_set_message(t('A communication error occurred. Please try again later or contact us to complete your order !email', array('!email' => _uc_paypoint_store_email())), 'error');
       $message = t('Communication error');
       $status = FALSE;
       break;
 
-    case 'P:A': case 'P:X': case 'P:P': case 'P:S': case 'P:E': case 'P:I':
-    case 'P:C': case 'P:T': case 'P:N': case 'P:M': case 'P:B': case 'P:D':
-    case 'P:V': case 'P:R': case 'P:#': // Pre-bank checks failed.
+    case 'P:A':
+    case 'P:X':
+    case 'P:P':
+    case 'P:S':
+    case 'P:E':
+    case 'P:I':
+    case 'P:C':
+    case 'P:T':
+    case 'P:N':
+    case 'P:M':
+    case 'P:B':
+    case 'P:D':
+    case 'P:V':
+    case 'P:R':
+    case 'P:#': // Pre-bank checks failed.
       drupal_set_message(t('The details of the order are not sufficient to complete the transaction and we were unable to process your
        payment. Please verify your details and try again. If the problem persists, please contact us. Many thanks. !email', array('!email' => _uc_paypoint_store_email())), 'error');
-     $message = t('Pre-bank check failed.');
-     $status = FALSE;
+      $message = t('Pre-bank check failed.');
+      $status = FALSE;
   }
 
   $message .= ' ' . _uc_paypoint_authorisation_code($results);
@@ -604,7 +683,7 @@ function uc_paypoint_complete_request($results) {
  * This form has been forked from uc_credit, removed the possibility to
  * configure form fields, since PayPoint expects them anyway.
  */
-function uc_paypoint_credit_form($form_state = array(), $order = NULL) {
+function uc_paypoint_credit_form($form, $form_state = array(), $order = NULL) {
   // Normally the CC data is posted in via AJAX.
   if (!empty($_POST['payment-details-data']) && arg(0) == 'cart') {
     $order->payment_details = uc_credit_cache('save', $_POST['payment-details-data']);
@@ -642,7 +721,7 @@ function uc_paypoint_credit_form($form_state = array(), $order = NULL) {
   );
 
   // Set up the default CC number on the credit card form.
-  if (variable_get('uc_credit_validate_numbers', TRUE) && (strlen($order->payment_details['cc_number']) > 4 && !_valid_card_number($order->payment_details['cc_number']))) {
+  if (variable_get('uc_credit_validate_numbers', TRUE) && (strlen($order->payment_details['cc_number']) > 4 && !_uc_credit_valid_card_number($order->payment_details['cc_number']))) {
     // Display the number as is if it does not validate so it can be corrected.
     $default_num = $order->payment_details['cc_number'];
   }
@@ -672,7 +751,7 @@ function uc_paypoint_credit_form($form_state = array(), $order = NULL) {
   $form['cc_exp_year'] = uc_select_year(t('Expiration Year'), $order->payment_details['cc_exp_year']);
 
   // Set up the default Issue Number on the credit card form.
-  if (!_valid_card_issue($order->payment_details['cc_issue'])) {
+  if (!_uc_credit_valid_card_issue($order->payment_details['cc_issue'])) {
     // Display the Issue Number as is if it does not validate so it can be corrected.
     $default_card_issue = $order->payment_details['cc_issue'];
   }
@@ -696,7 +775,7 @@ function uc_paypoint_credit_form($form_state = array(), $order = NULL) {
   );
 
   // Set up the default CVV  on the credit card form.
-  if (!_valid_cvv($order->payment_details['cc_cvv'])) {
+  if (!_uc_credit_valid_cvv($order->payment_details['cc_cvv'])) {
     // Display the CVV as is if it does not validate so it can be corrected.
     $default_cvv = $order->payment_details['cc_cvv'];
   }
@@ -787,7 +866,7 @@ function _uc_paypoint_response_code($code) {
 function _uc_paypoint_authorisation_code($parameters) {
   switch ($parameters['code']) {
     case "A":
-      return t('Transaction authorised by bank. Authorisation code @auth_code available as bank reference.',  array('@auth_code' => $parameters['auth_code']));
+      return t('Transaction authorised by bank. Authorisation code @auth_code available as bank reference.',   array('@auth_code' => $parameters['auth_code']));
     case "N":
       return t('Transaction not authorised.');
     case "C":
@@ -825,6 +904,10 @@ function _uc_paypoint_authorisation_code($parameters) {
   }
 }
 
+/**
+ * @todo Please document this function.
+ * @see http://drupal.org/node/1354
+ */
 function uc_paypoint_debug($parameters, $order = NULL) {
   $debug_mode = variable_get('uc_paypoint_debug', 'off');
   // In some cases $order will not be populated, often this is due to connection error to the remote server.
@@ -840,7 +923,8 @@ function uc_paypoint_debug($parameters, $order = NULL) {
     case 'log':
       watchdog('PayPoint', $debug);
       break;
-    case 'off': default:
+    case 'off':
+    default:
       continue;
       break;
   }
@@ -865,12 +949,12 @@ function _uc_paypoint_store_email() {
 /**
  * Assembling a Paypoint friendly structure of data to pass on as call parameters.
  *
- * Data can be passed as either a string, with comma separated key=value pairs, or in XML format. 
+ * Data can be passed as either a string, with comma separated key=value pairs, or in XML format.
  * The usage of XML format is not clear from documentation, therefore used only where it is explicitly mentioned.
  * The building of the data array is split into sections based on the API requirements.
  */
 function uc_paypoint_get_data($order) {
-  // Handling the first coupel of single parameters: 
+  // Handling the first coupel of single parameters:
   // mid, trans_id, vpn_pswd, ip, name, card_number, amount, expiry_date, issue_number, start_date.
   // We must format the year and month to format the service expects (mmyy).
   $expiry_date = date('my', mktime(0, 0, 0, $order->payment_details['cc_exp_month'], 1, $order->payment_details['cc_exp_year']));
@@ -933,7 +1017,7 @@ function uc_paypoint_get_data($order) {
   // Billing XML
   if (variable_get('uc_paypoint_send_billing', 1)) {
     $billing = array(
-      'name' => $order->billing_first_name .' '. $order->billing_last_name,
+      'name' => $order->billing_first_name . ' ' . $order->billing_last_name,
       'company' => $order->billing_company,
       'addr_1' => $order->billing_street1,
       'addr_2' => $order->billing_street2,
@@ -961,13 +1045,13 @@ function uc_paypoint_get_data($order) {
   // Shipping details
   if (variable_get('uc_paypoint_send_shipping', 1)) {
     $shipping = array(
-      'name'      => $order->shipping_first_name .' '. $order->shipping_last_name,
-      'company'   => $order->shipping_company,
-      'addr_1'    => $order->shipping_street1,
-      'addr_2'    => $order->shipping_street2,
-      'city'      => $order->shipping_city,
+      'name' => $order->shipping_first_name . ' ' . $order->shipping_last_name,
+      'company' => $order->shipping_company,
+      'addr_1' => $order->shipping_street1,
+      'addr_2' => $order->shipping_street2,
+      'city' => $order->shipping_city,
       'post_code' => $order->shipping_postal_code,
-      'tel'       => $order->shipping_phone,
+      'tel' => $order->shipping_phone,
     );
 
     $data['shipping'] = _uc_paypoint_prepare_list($shipping);
@@ -986,7 +1070,8 @@ function uc_paypoint_get_data($order) {
     'deferred' => variable_get('uc_paypoint_deferred_transactions', 'false'),
     'card_type' => $order->payment_details['cc_type'],
     'cv2' => $order->payment_details['cc_cvv'],
-    'currency' => variable_get('uc_paypoint_currency', 'GBP'),
+	'currency' => $order->currency,
+   // 'currency' => variable_get('uc_paypoint_currency', 'GBP'),
   );
 
   if (variable_get('uc_paypoint_test_status', 'true') == 'true') {
@@ -995,7 +1080,7 @@ function uc_paypoint_get_data($order) {
   if (variable_get('uc_paypoint_require_cv2', 1)) {
     $options['req_cv2'] = 'true';
   }
-  
+
   $data['options'] = _uc_paypoint_prepare_list($options);
   return $data;
 }
@@ -1041,13 +1126,13 @@ function _uc_paypoint_order_empty($order = NULL) {
     return TRUE;
   }
   $total = ($order->order_total == 0);
-  $billing = 
+  $billing =
     empty($order->billing_first_name) ||
     empty($order->billing_last_name) ||
     empty($order->billing_street1) ||
     empty($order->billing_city) ||
     empty($order->billing_postal_code);
-  $delivery = 
+  $delivery =
     empty($order->delivery_first_name) ||
     empty($order->delivery_last_name) ||
     empty($order->delivery_street1) ||

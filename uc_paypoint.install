@@ -8,6 +8,14 @@
  * been deployed on a very active Ubercart site.
  */
 
+/**
+ * @todo Please document this function.
+ * @see http://drupal.org/node/1354
+ */
 function uc_paypoint_uninstall() {
-  db_query("DELETE FROM {variable} WHERE name LIKE 'uc_paypoint%'");
+  // TODO Please review the conversion of this statement to the D7 database API syntax.
+  /* db_query("DELETE FROM {variable} WHERE name LIKE 'uc_paypoint%'") */
+  db_delete('variable')
+    ->condition('name', 'uc_paypoint%', 'LIKE')
+    ->execute();
 }
